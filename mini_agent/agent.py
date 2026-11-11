@@ -44,19 +44,24 @@ class MiniWorkAgent:
         self,
         *,
         llm_kind: str = "auto",
+        llm=None,
         persist_dir: str | Path | None = None,
         trace_path: str | Path | None = None,
         max_tool_rounds: int = 5,
         persona: str = PERSONA,
     ) -> None:
         self.runtime = build_default_runtime(
-            llm_kind=llm_kind,
+            llm_kind="heuristic" if llm is not None else llm_kind,
             persist_dir=persist_dir,
             trace_path=trace_path,
             echo_trace=False,
             config=RuntimeConfig(max_tool_rounds=max_tool_rounds,
                                  extra_instructions=persona),
         )
+        if llm is not None:
+            # 允许注入自定义后端（测试 / 私有端点），换后端不需要改 Runtime
+            self.runtime.llm = llm
+            self.runtime.protocol = getattr(llm, "protocol_name", "json")
 
     # ---- 身份 -------------------------------------------------------------
     @property

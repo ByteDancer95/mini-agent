@@ -45,6 +45,28 @@ LLM 只是被抽象成 `generate(messages, tool_schemas) -> LLMResponse` 的一�
 tool_calls。可用 `--check-llm` 当场自检当前接的是不是真模型，并用
 `python -m mini_agent.walkthrough --llm openai` 逐帧导出真实模型的决策原文。
 
+### 1.2 题目要求逐条对照（评分点索引）
+
+| # | 题目要求 | 实现位置 | 怎么验证 |
+| --- | --- | --- | --- |
+| 1 | 不依赖 langgraph / openhands / openclaw，核心 Runtime 自研 | `core/runtime.py`，全仓零第三方依赖 | `test_runtime.TestBasicLoop`；仓库无相关 import |
+| 2 | 基本 loop：直答 / 调工具 / 依据结果继续或收尾 | `AgentRuntime.run()` 的 `for ... else` | `test_runtime.test_tool_result_decides_to_continue_loop`；`python -m mini_agent.demo` |
+| 3 | 工具注册：name + description + 参数 Schema，LLM 据此自主决策 | `core/registry.py`、`core/prompt.py` | `test_registry`；`walkthrough` 帧 1 / 帧 3；`test_openai_e2e`（真实 HTTP） |
+| 4 | 输出解析：思考过程 / 工具调用 / 最终答案 | `core/parser.py` | `test_parser`（14 个容错用例） |
+| 5 | ≥3 工具：calculator、search(mock)、todo(必须)；可扩展 | `tools/`，`build_default_registry(extensions=...)` | `test_tools`、`test_registry.test_decorator_custom_extension` |
+| 6 | 多 session 隔离、分别随时继续对话 | `core/session.py` + `todo.py` 的 `ctx.state` | `python -m mini_agent.demo`；`test_sessions` |
+| 7 | context：最大轮次、历史、纯对话/带工具追问、自行取舍、基础压缩 | `core/context.py`、`runtime.py` | **§5 专章**；`test_context`、`test_runtime.TestContextDecisions` |
+| 8 | 异常处理 + 工具调用 trace / 执行日志 | 四级兜底 + `core/trace.py` | `--trace --trace-file`；`test_runtime.TestErrorHandlingInLoop` |
+| 9 | 覆盖以上功能的测试用例 | `tests/`（**129 个**） | `python -m unittest discover -s tests -v` |
+| 10 | README：运行方式、系统设计、**memory 召回时机与放置方式** | §2 / §4 / **§5** | 直接查阅 |
+| 11 | AI Prompt 与问题解决记录 | `PROMPT_LOG.md` | 直接查阅 |
+| 12 | 代码中严禁写 LLM API / 密钥 | `core/llm.py` 只读环境变量、`.env.example` 空值、`.gitignore` | `test_python_sources_have_no_hardcoded_credentials`；`git grep` |
+
+> **为什么不做垂直业务场景**：这是一道考察 Agent Runtime 与 context 判断的笔试题，
+> 工具清单（`calculator / search / todo / weather / read_docs`）本身就是通用能力验收。
+> 再加一层"农业/客服/代码助手"之类的领域封装不会命中任何评分点，反而会稀释
+> 核心机制、增加无关代码。把「哪些信息进 context、为什么」讲透，比多加一个场景更有分。
+
 ---
 
 ## 2. 快速开始
@@ -334,17 +356,28 @@ maximum / minLength / maxLength / pattern / items / minItems / maxItems` 子集�
   `tool_result_max_chars` 截断；
 * `assistant`（最终答案） — 纯文本答案。
 
-### 5.3 哪些信息**不**进入 LLM context（自行判断的结论）
+### 5.3 哪些信息进入 context（自行判断的结论）
 
-| 信息 | 去向 | 理由 |
-| --- | --- | --- |
-| **Agent 思考过程 thought** | `ContextManager._audit`（会话审计，可持久化）+ `Trace` 的 `thought` 事件 | 中间推理回放会显著增加 token，且容易让模型复读上一步；观测/调试需要它，但决策不需要 |
-| 超长工具 payload | 截断后只留前缀 | 防止 context 被单次检索结果撑爆 |
-| 过旧的回合 | 压成 digest 一行 | 基础压缩，见 5.4 |
-| 系统提示词 / 修复提示 | 每次临时构造 | 属于协议而非记忆，存下来会随工具表变化而过期 |
+**判断标准只有一条**：这条信息会不会改变模型「下一轮该直接回答还是继续调工具」的决策？
+会 → 进 LLM context；不会 → 不进，但保留在 trace / 审计里以支持可观测性与调试。
+按这个标准逐类过一遍：
+
+| 信息类型 | 是否进 LLM context | 放置位置 / 不进时去向 | 判断理由 |
+| --- | --- | --- | --- |
+| 用户输入 | **进** | 历史 `role=user` | 是本轮任务的唯一依据；压缩时也要保证最近一条 user 不被折掉，否则追问失去指代 |
+| 工具执行结果 | **进** | 紧跟工具决策的 `role=tool`，`<tool_result>` 包裹 | 是「依据工具结果决定继续 loop 或收尾」的事实基础，缺了模型只能瞎猜或复读 |
+| 工具调用决策（action） | **进** | 历史 `role=assistant`，只含 `action` | 让模型知道自己上一轮做过什么，避免重复调用同一个工具 |
+| **Agent 思考过程 thought** | **不进**（默认） | `_audit` 会话审计 + `Trace.thought` 事件 | 是中间推理，不是新事实；回放会显著增加 token 且容易让模型复读上一步推理。观测/调试需要它，决策不需要 |
+| 最终答案 | **进** | 历史 `role=assistant` 纯文本 | 纯对话追问必须能引用上一轮结论 |
+| 系统提示词 / 工具目录 / 修复提示 | 每轮临时重建，不存入历史 | `build_messages()[0]`，`volatile=True` | 属于协议而非记忆；存下来会随工具表变化而过期 |
+| todo 状态 | **按需进**（紧凑快照） | `build_messages()` 里的 `[Session state snapshot]`，system 角色 | 全量回放浪费 token；只在状态非空时注入一行摘要，让模型知道"已经记了什么" |
+| 超长工具 payload | 截断后进 | `tool_result_max_chars` 截前缀 | 防止单次检索结果撑爆 context |
+| 过旧回合 | 压缩后进 | `[Earlier conversation digest]` 一行一条 | 基础压缩，见 5.4 |
 
 > 如果确实想把 thought 放进 context（例如做可解释性演示），
 > 设 `ContextPolicy(include_thought_in_llm_context=True)` 或 CLI 加 `--include-thought`，无需改 Runtime。
+> 对照测试：`test_runtime.test_thought_excluded_from_llm_context_but_kept_in_audit_and_trace`
+> 与 `test_thought_included_when_policy_enabled`。
 
 ### 5.4 最大轮次与基础压缩
 
@@ -398,11 +431,11 @@ tool_call / tool_result / repair / compact / loop_limit / final / error / warnin
 ## 8. 测试
 
 ```bash
-python -m unittest discover -s tests -v      # 零依赖，126 个用例
+python -m unittest discover -s tests -v      # 零依赖，129 个用例
 # 若已安装 pytest，也可用 pytest -q（unittest.TestCase 可被 pytest 直接收集）
 ```
 
-本机验证：`Ran 126 tests ... OK`（Python 3.14.3）。
+本机验证：`Ran 129 tests ... OK`（Python 3.14.3）。
 
 覆盖矩阵：
 
@@ -417,6 +450,7 @@ python -m unittest discover -s tests -v      # 零依赖，126 个用例
 | `test_llm.py` | 缺配置报错、源码无硬编码凭据、自动降级、`.env` 不覆盖进程环境、json/native 请求体、HTTP/网络异常 |
 | `test_integration.py` | 完整双窗口演示通过、trace JSONL 落盘与不串台、CLI 入口、仓库无密钥、交付文件齐全 |
 | `test_agent.py` | 具名 Agent 身份/工具/`ask()`/4 轮连续对话与状态、后端标注、`--check-llm` 自检、协议实录 8 帧与落盘、无配置时优雅失败 |
+| `test_openai_e2e.py` | **本地 fake OpenAI 端点 + 真实 HTTP**：json/native 两种协议各跑完整 loop，断言工具 Schema 真交给模型、工具结果真回灌、thought 不进 context、trace 完整（无需任何真实密钥） |
 
 ---
 

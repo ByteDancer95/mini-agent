@@ -173,12 +173,54 @@ LLM 的 context？请给出取舍理由、放置位置、以及一个基础压�
 
 ---
 
-## 六、复现验证
+## 六、第三轮：确认是「公司笔试题」之后的方向判断
+
+### 触发的提问
+
+> 「这是一道公司出的笔试题，根据这个题目，你觉得应该往哪个方向」
+
+**这个前提改变了判断**。前两轮我按"比赛 demo"的隐含思路纠结"够不够具体、
+有没有业务场景"；笔试题的评分逻辑完全不同：
+
+| | 比赛 demo | 公司笔试题（本题） |
+| --- | --- | --- |
+| 看什么 | 演示冲击力、目标用户价值、差异化 | 工程实现是否扎实、边界是否处理、能否自证 |
+| 加分项 | 具体场景、漂亮 UI、真实效果 | 逐条命中题目列出的能力点、可测试、可复现 |
+| 加垂直场景 | 加分 | **跑题 / 稀释核心**，题目工具清单本身就是通用能力验收 |
+
+题目把评分点逐条写死了：自研 loop、Schema 决策、输出解析、3 个指定工具、
+多 session、context 判断、异常/trace、测试用例、README 里的 **memory 召回时机与放置方式**、
+AI Prompt 记录、无密钥。尤其点名「自行判断用户输入、工具执行结果、Agent 思考过程等
+哪些信息进入 context」——考的是 **context engineering 的判断力**，不是业务包装。
+
+**结论：保持通用 Runtime 方向，不加农事助理/客服/代码助手之类的领域封装。**
+把力气花在「让评分人 30 秒能逐条打勾」和「把真实 LLM 链路变成无需密钥也能复现的证据」。
+
+### 本轮改动
+
+| # | 改动 | 目的 | 文件 / 测试 |
+| --- | --- | --- | --- |
+| 26 | README 新增 **§1.2 题目要求逐条对照表**（12 行：要求 → 实现位置 → 验证命令） | 评分点索引，30 秒可打勾；并写明「为什么不做垂直业务场景」的设计判断 | `README.md` |
+| 27 | README **§5.3 重写为「哪些信息进入 context」判定表**：给出唯一判断标准「会不会改变下一轮决策」，逐类列出 9 类信息的进/不进、放置位置与理由 | 题目特别点名的「自行判断」与「memory 召回时机与放置方式」 | `README.md` |
+| 28 | 新增 `tests/test_openai_e2e.py`：起本地 fake OpenAI 兼容 HTTP 端点，用 `OpenAICompatLLM` 跑**真实 HTTP** 完整 loop（json / native 两种协议） | 彻底坐实「LLM 基于 Schema 自主决策」不只是 mock.patch；断言工具 Schema 真进 system prompt、工具结果真回灌、thought 不进 context | `test_openai_e2e.py`（3 个用例） |
+| 29 | `MiniWorkAgent` 支持注入 `llm` 后端 | 便于用假端点验证整机在真实后端下的行为与标注 | `agent.py` |
+| 30 | 测试 126 → **129** 个用例 | 覆盖端到端真实 HTTP 链路 | 全量回归 |
+
+### 由此得到的最终定性
+
+这是一个**通用工具调用型 ReAct Agent（中文任务助理）**，价值在 Runtime 机制而非业务能力；
+默认后端是离线替身，接真实 LLM 后才是完整 AI Agent。对笔试题而言这个定性是**正确且够用**的，
+不需要再加场景；README §1.1 / §1.2 已把边界与取舍写清楚，避免评分人误判为"交了个框架"。
+
+---
+
+## 七、复现验证
 
 ```bash
 python -m mini_agent.agent                     # 和一个具体 Agent 连续对话 4 轮
 python -m mini_agent.walkthrough               # 逐帧查看一轮决策链路
 python -m mini_agent.cli --check-llm           # 自检当前是不是真实 LLM
 python -m mini_agent.demo                      # 双窗口隔离演示，输出「全部通过」
-python -m unittest discover -s tests -v       # 126 个用例全量回归
+python -m unittest tests.test_openai_e2e -v    # 本地 fake 端点 + 真实 HTTP 的端到端验证
+python -m unittest discover -s tests -v       # 129 个用例全量回归
 ```
