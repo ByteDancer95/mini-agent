@@ -91,6 +91,10 @@ class AgentRuntime:
             trace.add(EventType.RUN_START, max_tool_rounds=self.config.max_tool_rounds,
                       tools=self.registry.names(), llm_protocol=self.protocol)
             trace.add(EventType.USER_INPUT, text=text)
+            # 压缩不能只在「调用工具」分支触发：纯对话长会话同样会无限增长。
+            # 在每轮 run 的开头检查一次，保证跨轮次 context 消息数始终有界。
+            if ctx.maybe_compact():
+                trace.add(EventType.COMPACT, turn=0, stats=ctx.stats(), phase="run_start")
 
             tool_ctx = ToolContext(session_id=session_id, state=session.state,
                                    docs_root=self.docs_root)

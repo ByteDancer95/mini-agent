@@ -10,7 +10,7 @@ from unittest import mock
 
 logging.getLogger("mini_agent").setLevel(logging.CRITICAL)
 
-from mini_agent.agent import AGENT_NAME, MiniWorkAgent, create_agent, main as agent_main  # noqa: E402
+from mini_agent.agent import AGENT_NAME, MiniWorkAgent, create_agent  # noqa: E402
 from mini_agent.cli import main as cli_main  # noqa: E402
 from mini_agent.core.llm import check_llm_config  # noqa: E402
 from mini_agent.walkthrough import build_transcript, main as walkthrough_main  # noqa: E402
@@ -51,25 +51,22 @@ class TestConcreteAgent(unittest.TestCase):
 
     def test_multiturn_conversation_keeps_history_and_state(self):
         agent = create_agent(llm_kind="heuristic")
-        turns = list(agent.scripted_conversation("demo"))
+        questions = [
+            "查一下广州今天的天气，顺便记个待办：明天给大棚番茄喷药",
+            "再帮我算一下 18*24 是多少",
+            "继续，把我的待办列出来",
+            "不用工具，用一句话说说你刚才都做了什么",
+        ]
+        turns = [agent.ask("demo", q) for q in questions]
         self.assertEqual(len(turns), 4)
-        self.assertTrue(all(r.status == "ok" for _, r in turns))
+        self.assertTrue(all(r.status == "ok" for r in turns))
         session = agent.runtime.sessions.get_or_create("demo")
         self.assertEqual(len([m for m in session.context.messages if m.role == "user"]), 4)
         self.assertEqual([t["item"] for t in session.state["todos"]],
                          ["明天给大棚番茄喷药"])
         # 最后一轮是纯对话追问，不调工具，且引用了历史
-        self.assertEqual(turns[-1][1].trace.tool_calls(), [])
-        self.assertIn("承接上一轮回答", turns[-1][1].answer)
-
-    def test_agent_module_runnable(self):
-        with redirect_stdout(io.StringIO()) as buf:
-            code = agent_main(["--llm", "heuristic"])
-        self.assertEqual(code, 0)
-        text = buf.getvalue()
-        self.assertIn("第 4 轮", text)
-        self.assertIn("最终待办", text)
-        self.assertIn(AGENT_NAME, text)
+        self.assertEqual(turns[-1].trace.tool_calls(), [])
+        self.assertIn("承接上一轮回答", turns[-1].answer)
 
 
 class TestLLMConfigCheck(unittest.TestCase):

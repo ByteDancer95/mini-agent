@@ -2,7 +2,7 @@
 
     python -m mini_agent.walkthrough                        # 离线协议验证后端
     python -m mini_agent.walkthrough --llm openai           # 配好 .env 后，逐帧展示真实模型决策
-    python -m mini_agent.walkthrough --save docs/RUN_TRANSCRIPT.md
+    python -m mini_agent.walkthrough --save <任意路径>       # 按需导出，生成物不进版本库
 
 它复用与 AgentRuntime **完全相同**的组件（build_system_prompt / ContextManager /
 OutputParser / ToolRegistry / LLMClient），只是把中间结果打印出来，

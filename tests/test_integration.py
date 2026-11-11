@@ -9,7 +9,7 @@ from pathlib import Path
 
 from mini_agent.core.runtime import build_default_runtime
 from mini_agent.core.trace import TraceSink
-from mini_agent.demo import STEPS, WINDOW_1, WINDOW_2, run_demo
+from mini_agent.cli import DEMO_STEPS, WINDOW_1, WINDOW_2, run_demo
 
 try:
     from .helpers import ROOT, make_heuristic_runtime
@@ -41,7 +41,7 @@ class TestEndToEndDemo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "agent_trace.jsonl"
             rt = build_default_runtime(llm_kind="heuristic", trace_path=log)
-            results = [rt.run(sid, text) for sid, text, _ in STEPS]
+            results = [rt.run(sid, text) for sid, text, _ in DEMO_STEPS]
             self.assertTrue(all(r.status == "ok" for r in results))
             self.assertGreater(sum(len(r.trace.tool_calls()) for r in results), 5)
 

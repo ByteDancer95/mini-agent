@@ -1,0 +1,102 @@
+[
+  {
+    "id": "fenced_tool_call",
+    "raw": "```json\n{\"thought\": \"需要计算\", \"action\": {\"type\": \"tool\", \"tool_calls\": [{\"name\": \"calculator\", \"arguments\": {\"expression\": \"1+1\"}}]}}\n```",
+    "note": "模型常把协议 JSON 包在 Markdown 围栏里"
+  },
+  {
+    "id": "fenced_final",
+    "raw": "```JSON\n{\"thought\": \"已有信息\", \"action\": {\"type\": \"final\", \"content\": \"答案是 42\"}}\n```",
+    "note": "围栏大小写变体"
+  },
+  {
+    "id": "prose_prefix",
+    "raw": "好的，我先调用工具算一下：\n{\"thought\": \"t\", \"action\": {\"type\": \"tool\", \"tool_calls\": [{\"name\": \"calculator\", \"arguments\": {\"expression\": \"2*3\"}}]}}",
+    "note": "JSON 前有解释文字"
+  },
+  {
+    "id": "prose_suffix",
+    "raw": "{\"thought\": \"t\", \"action\": {\"type\": \"final\", \"content\": \"完成\"}}\n以上是我的回答，希望有帮助。",
+    "note": "JSON 后有解释文字"
+  },
+  {
+    "id": "truncated_json",
+    "raw": "{\"thought\":\"x\",\"action\":{\"type\":\"tool\",\"tool_calls\":[{\"name\":\"calculator\",\"arguments\":{\"expression\":\"1+1\"",
+    "note": "流式输出被截断 / max_tokens 太小"
+  },
+  {
+    "id": "fullwidth_quotes",
+    "raw": "｛\"thought\"：\"x\"，\"action\"：｛\"type\"：\"final\"，\"content\"：\"答案\"｝｝",
+    "note": "中文输入法导致的全角标点"
+  },
+  {
+    "id": "arguments_as_json_string",
+    "raw": "{\"action\": {\"type\": \"tool\", \"tool_calls\": [{\"name\": \"calculator\", \"arguments\": \"{\\\"expression\\\": \\\"2*3\\\"}\"}]}}",
+    "note": "arguments 被序列化成字符串而非对象"
+  },
+  {
+    "id": "both_final_and_tools",
+    "raw": "{\"thought\": \"t\", \"action\": {\"type\": \"final\", \"content\": \"随便说说\"}, \"tool_calls\": [{\"name\": \"todo\", \"arguments\": {\"action\": \"list\"}}]}",
+    "note": "模型同时给了 final 和 tool_calls"
+  },
+  {
+    "id": "empty_output",
+    "raw": "",
+    "note": "空响应 / 内容过滤"
+  },
+  {
+    "id": "plain_natural_language",
+    "raw": "我不需要工具，直接回答你：今天适合田间作业。",
+    "note": "模型完全不遵守协议，直接说人话"
+  },
+  {
+    "id": "unknown_tool",
+    "raw": "{\"action\": {\"type\": \"tool\", \"tool_calls\": [{\"name\": \"does_not_exist\", \"arguments\": {}}]}}",
+    "note": "模型幻觉出不存在的工具名"
+  },
+  {
+    "id": "invalid_tool_arguments",
+    "raw": "{\"action\": {\"type\": \"tool\", \"tool_calls\": [{\"name\": \"calculator\", \"arguments\": {}}]}}",
+    "note": "模型漏掉必填参数"
+  },
+  {
+    "id": "json_array_instead_of_object",
+    "raw": "[{\"action\": {\"type\": \"final\", \"content\": \"数组包了一层\"}}]",
+    "note": "模型输出数组而非对象"
+  },
+  {
+    "id": "native_function_shape",
+    "raw": "{\"tool_calls\": [{\"function\": {\"name\": \"todo\", \"arguments\": \"{\\\"action\\\": \\\"list\\\"}\"}}]}",
+    "note": "混用了 OpenAI native function calling 的字段形状"
+  },
+  {
+    "id": "null_entry_in_tool_calls",
+    "raw": "{\"action\": {\"type\": \"tool\", \"tool_calls\": [null, {\"name\": \"todo\", \"arguments\": {\"action\": \"list\"}}]}}",
+    "note": "tool_calls 数组里混入 null"
+  },
+  {
+    "id": "bom_and_whitespace",
+    "raw": "\ufeff  \n{\"action\": {\"type\": \"final\", \"content\": \"带 BOM\"}}  \n",
+    "note": "响应带 BOM 与多余空白"
+  },
+  {
+    "id": "final_without_content",
+    "raw": "{\"thought\": \"做完了\", \"action\": {\"type\": \"final\"}}",
+    "note": "声明 final 但没给内容"
+  },
+  {
+    "id": "markdown_heading_plus_json",
+    "raw": "### 结果\n{\"action\": {\"type\": \"final\", \"content\": \"标题后面跟 JSON\"}}",
+    "note": "带 Markdown 标题"
+  },
+  {
+    "id": "single_quoted_object",
+    "raw": "{'action': {'type': 'final', 'content': 'x'}}",
+    "note": "Python 风格单引号，不是合法 JSON"
+  },
+  {
+    "id": "very_long_output",
+    "raw": "模型输出超长纯文本，未遵守协议。接着是一段很长的重复内容：AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "note": "超长纯文本，验证不会被截断逻辑或日志打崩"
+  }
+]
