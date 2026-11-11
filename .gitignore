@@ -1,0 +1,24 @@
+# 密钥：绝对不提交
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 运行时产物：会话状态 / 日志 / trace
+.mini_agent_sessions/
+logs/
+*.jsonl
+
+# 虚拟环境 / 编辑器
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
