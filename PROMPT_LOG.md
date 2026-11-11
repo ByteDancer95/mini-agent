@@ -137,10 +137,48 @@ LLM 的 context？请给出取舍理由、放置位置、以及一个基础压�
 
 ---
 
-## 五、复现验证
+## 五、第二轮迭代：回应「题目不是要实现某一个具体的 Agent 吗」
+
+### 触发的提问与判断
+
+> 「这个题目不是要实现某一个具体的可实现的 agent 吗」
+
+复盘结论分两层：
+
+1. **方向没错**：题目写的是「核心 Agent Runtime 必须实现」「不依赖现有 agent 框架完成主流程」，
+   且指定工具为 `calculator / search / todo / weather / read_docs` —— 这是通用能力验收，
+   不是复刻框架，也不是某个垂直业务 bot。所以交付物应当是「一个能跑的 Agent 程序 + 自研内核」。
+2. **但观感与实质各有缺口**（这是提问真正命中的地方）：
+   * 观感：10 个模块 + Protocol + 工厂 + 双协议，容易被看成「交了个框架库」而不是「一台整机」；
+   * 实质：零配置时做决策的是 `HeuristicLLM` 关键词替身，严格讲「让 LLM 基于 Schema 自主决策」
+     只是**协议级验证**，不是真实模型决策。评委若追问，这是软肋。
+
+### 本轮改动（不改动 Runtime 主流程，全部向后兼容）
+
+| # | 改动 | 目的 | 文件 / 测试 |
+| --- | --- | --- | --- |
+| 21 | 新增具名整机 `MiniWorkAgent`（「小田 · 中文工作助理」）：固定名字、persona、工具集、会话策略与 `ask()` 接口，`python -m mini_agent.agent` 一键跑 4 轮连续对话 | 让「某一个具体的 Agent」有明确实体，而不是只有 `core/` | `agent.py`；`test_agent.TestConcreteAgent` |
+| 22 | 新增 `walkthrough.py` 与 `docs/RUN_TRANSCRIPT.md`：逐帧导出「工具 Schema 目录 → system prompt → 模型原始输出 → 解析 → 工具执行 → 结果回灌 → 第二次输出 → 最终答案 → Runtime trace」，复用与 Runtime 完全相同的组件 | 把「LLM 基于 Schema 自主决策」这条链路变成可出示的证据；`--llm openai` 时帧 3/帧 7 就是真实模型原文 | `walkthrough.py`；`test_agent.TestProtocolWalkthrough` |
+| 23 | 新增 `check_llm_config()` 与 `--check-llm`：只读自检，不发起请求、不打印密钥；CLI 启动横幅明确标注当前后端是「真实 LLM」还是「离线协议验证替身」 | 消除「到底是不是真模型」的含糊空间，避免替身被误认为 AI | `llm.py`、`cli.py`、`agent.py`；`test_agent.TestLLMConfigCheck` |
+| 24 | README 新增 1.1 节「边界：交付的是一个具体 Agent，不是框架库」与「怎么验收真实 LLM 自主决策」 | 把判断依据与诚实的限制写清楚 | `README.md` |
+| 25 | 测试 115 → **126** 个用例 | 覆盖新增整机、实录、自检三条链路 | `tests/test_agent.py` |
+
+### 依然如实保留的限制
+
+* 题目禁止把 API Key 写进代码，本机也没有配置 LLM 环境变量，
+  因此**仓库内无法产生一份真实模型的输出样本**；`docs/RUN_TRANSCRIPT.md` 已明确标注是离线替身版本。
+  评委/使用者按 README 第 2 节填 `.env` 后，用
+  `python -m mini_agent.walkthrough --llm openai --save my_run.md` 即可生成真实模型版本。
+* `HeuristicLLM` 的定位由「零密钥演示模式」收紧为「**离线协议验证替身，不声称是真实模型**」。
+
+---
+
+## 六、复现验证
 
 ```bash
-python -m mini_agent.demo                       # 双窗口隔离演示，输出「全部通过」
-python -m unittest discover -s tests -v        # 全量回归
-python -m mini_agent.cli --trace               # 人工查看逐轮 trace
+python -m mini_agent.agent                     # 和一个具体 Agent 连续对话 4 轮
+python -m mini_agent.walkthrough               # 逐帧查看一轮决策链路
+python -m mini_agent.cli --check-llm           # 自检当前是不是真实 LLM
+python -m mini_agent.demo                      # 双窗口隔离演示，输出「全部通过」
+python -m unittest discover -s tests -v       # 126 个用例全量回归
 ```

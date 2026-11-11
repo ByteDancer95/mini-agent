@@ -27,7 +27,7 @@ from .types import LLMResponse, Message, ToolCall
 
 __all__ = [
     "LLMClient", "OpenAICompatLLM", "HeuristicLLM", "ScriptedLLM",
-    "build_llm", "load_env_file",
+    "build_llm", "load_env_file", "check_llm_config",
 ]
 
 logger = logging.getLogger("mini_agent.llm")
@@ -469,3 +469,23 @@ def build_llm(kind: str = "auto", **kwargs: Any) -> LLMClient:
                   "配置方式见 README / .env.example。")
             return HeuristicLLM()
     raise ValueError(f"未知 LLM 类型: {kind}")
+
+
+def check_llm_config() -> dict[str, Any]:
+    """只读自检：真实 LLM 配置是否齐全。**不发起任何网络请求，不返回密钥内容**。
+
+    用于 `--check-llm`：让「接的是不是真模型」这件事可被当场验证，
+    而不是靠文档口头声明。
+    """
+    try:
+        client = OpenAICompatLLM()
+    except LLMConfigError as exc:
+        return {"ok": False, "backend": None, "error": str(exc)}
+    return {
+        "ok": True,
+        "backend": "OpenAICompatLLM",
+        "model_configured": bool(client.model),
+        "base_url_configured": bool(client.base_url),
+        "api_key_configured": bool(client.api_key),
+        "protocol": client.protocol_name,
+    }

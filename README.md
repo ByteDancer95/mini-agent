@@ -23,6 +23,27 @@ LLM 只是被抽象成 `generate(messages, tool_schemas) -> LLMResponse` 的一�
 | trace / 日志 | `core/trace.py` | 结构化事件 + JSONL 落盘 + 可读执行日志 |
 | 异常处理 | 全链路 | 工具级 / 解析级 / LLM 级 / Runtime 边界四级兜底 |
 | 无密钥 | `core/llm.py` | Key / Base URL / Model 只读环境变量，源码无任何凭据或厂商地址 |
+| 具名 Agent 实例 | `agent.py` | 「小田 · 中文工作助理」，固定身份/工具/策略，一条命令即可对话 |
+| 决策实录 | `walkthrough.py` | 逐帧打印 Schema → 思考 → 工具调用 → 结果回灌 → 最终答案 |
+
+### 1.1 边界：交付的是「一个具体 Agent」，不是框架库
+
+题目要的是**一个最小可用的 Agent 程序**，其内核（Runtime）必须自己实现；
+不是复刻 langgraph 那类框架，也不是某个垂直业务 bot（题目指定的
+`calculator / search / todo / weather / read_docs` 就是通用能力验收）。
+
+* `mini_agent/core/` 是**引擎**，自己不是交付物，也不打算被外部项目当框架引用；
+* `mini_agent/agent.py` 是把引擎装成**整机**的地方：`MiniWorkAgent` 有名字、persona、
+  固定工具集、会话策略与 `ask()` 接口。运行 `python -m mini_agent.agent`
+  就得到一个能收话、自己决定调不调工具、执行、追问、给答案的具体 Agent；
+* `cli.py` / `demo.py` / `walkthrough.py` 是这台整机的不同观察窗口。
+
+**关于「LLM 自主决策」的诚实说明**：零配置时 `auto` 会降级为 `HeuristicLLM`——
+一个本地确定性替身，它只用来在没有 key 的环境里验证 loop / 解析 / 工具 / 会话隔离的
+数据形态，**不声称是真实模型**。真实决策链路是完全相同的 `LLMClient.generate()`：
+配好 `.env` 后 `--llm openai`，模型就会基于同一张工具 Schema 自己产出 thought 与
+tool_calls。可用 `--check-llm` 当场自检当前接的是不是真模型，并用
+`python -m mini_agent.walkthrough --llm openai` 逐帧导出真实模型的决策原文。
 
 ---
 
@@ -34,14 +55,24 @@ LLM 只是被抽象成 `generate(messages, tool_schemas) -> LLMResponse` 的一�
 git clone https://github.com/ByteDancer95/mini-agent.git
 cd mini-agent
 
-# ① 零密钥：直接跑题目指定的双窗口隔离演示
+# ① 直接和「小田」这个具体 Agent 连续对话 4 轮（推荐先看这个）
+python -m mini_agent.agent
+
+# ② 逐帧看一轮决策：工具 Schema → 思考 → tool_calls → 工具结果 → 最终答案
+python -m mini_agent.walkthrough
+# 已生成一份现成的实录：docs/RUN_TRANSCRIPT.md
+
+# ③ 题目指定的双窗口隔离演示
 python -m mini_agent.demo
 
-# ② 交互式 REPL（未配置 LLM 时自动使用 HeuristicLLM 演示模式）
+# ④ 交互式 REPL（多 session 切换）
 python -m mini_agent.cli
 python -m mini_agent.cli --trace --trace-file logs/agent_trace.jsonl
 
-# ③ 运行全部测试
+# ⑤ 自检当前接的是不是真实 LLM（只读，不发起请求，不打印密钥）
+python -m mini_agent.cli --check-llm
+
+# ⑥ 运行全部测试
 python -m unittest discover -s tests -v
 ```
 
@@ -74,6 +105,19 @@ python -m mini_agent.cli --llm auto       # 默认：配置齐全用真实模型
 > `json` 模式把工具目录和自研输出协议写进 system prompt，任何 OpenAI 兼容端点都能用；
 > `native` 模式把 Schema 放进 Chat Completions 的 `tools` 参数并解析原生 `tool_calls`。
 > 两种模式共用**同一个 Runtime**，切换只需改环境变量。
+
+### 怎么验收「真的是 LLM 在基于 Schema 自主决策」
+
+```bash
+python -m mini_agent.cli --check-llm                       # 应显示 ok: True
+python -m mini_agent.walkthrough --llm openai --save my_run.md
+python -m mini_agent.agent --llm openai --trace
+```
+
+三条命令分别验证：配置可见（不打印密钥）、模型输出的 thought / tool_calls 原文可导出、
+整机在真实模型下仍能跑完 loop 与多轮追问。`walkthrough` 的**帧 3 / 帧 7 是模型原始输出**，
+不是代码构造的，可直接作为验收证据；`docs/RUN_TRANSCRIPT.md` 是离线替身版本，
+用于展示同样的数据形态（已在文内明确标注，不冒充真实模型）。
 
 ### REPL 命令
 
@@ -108,7 +152,8 @@ mini-agent/
 ├── .gitignore
 ├── docs/                     read_docs 工具读取的本地文档
 │   ├── weekly_report_template.md
-│   └── sample_notes.md
+│   ├── sample_notes.md
+│   └── RUN_TRANSCRIPT.md      一轮 Agent 决策的逐帧实录（协议验收证据）
 ├── mini_agent/
 │   ├── core/
 │   │   ├── types.py          Message / ToolCall / ToolSpec / ToolResult / AgentOutput ...
@@ -128,8 +173,10 @@ mini-agent/
 │   │   ├── todo.py           会话级待办
 │   │   ├── weather.py        mock 天气（扩展示例）
 │   │   └── read_docs.py      本地文档读取（扩展示例）
-│   ├── cli.py                交互式 CLI
-│   └── demo.py               双窗口隔离演示
+│   ├── agent.py              ★ 具名的具体 Agent：小田 · 中文工作助理
+│   ├── cli.py                交互式 CLI（多 session / --check-llm）
+│   ├── demo.py               双窗口隔离演示
+│   └── walkthrough.py        逐帧导出一轮决策链路（--llm openai 即真实模型原文）
 └── tests/                     unittest 测试（也可用 pytest 运行）
 ```
 
@@ -351,11 +398,11 @@ tool_call / tool_result / repair / compact / loop_limit / final / error / warnin
 ## 8. 测试
 
 ```bash
-python -m unittest discover -s tests -v      # 零依赖，115 个用例
+python -m unittest discover -s tests -v      # 零依赖，126 个用例
 # 若已安装 pytest，也可用 pytest -q（unittest.TestCase 可被 pytest 直接收集）
 ```
 
-本机验证：`Ran 115 tests ... OK`（Python 3.14.3）。
+本机验证：`Ran 126 tests ... OK`（Python 3.14.3）。
 
 覆盖矩阵：
 
@@ -369,6 +416,7 @@ python -m unittest discover -s tests -v      # 零依赖，115 个用例
 | `test_context.py` | 写入策略、build_messages 放置顺序、digest 召回、按条数/字数压缩、保留最近 user、序列化 |
 | `test_llm.py` | 缺配置报错、源码无硬编码凭据、自动降级、`.env` 不覆盖进程环境、json/native 请求体、HTTP/网络异常 |
 | `test_integration.py` | 完整双窗口演示通过、trace JSONL 落盘与不串台、CLI 入口、仓库无密钥、交付文件齐全 |
+| `test_agent.py` | 具名 Agent 身份/工具/`ask()`/4 轮连续对话与状态、后端标注、`--check-llm` 自检、协议实录 8 帧与落盘、无配置时优雅失败 |
 
 ---
 

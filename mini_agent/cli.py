@@ -24,13 +24,13 @@ import sys
 from pathlib import Path
 
 from .core.context import ContextPolicy
-from .core.llm import load_env_file
+from .core.llm import check_llm_config, load_env_file
 from .core.runtime import RuntimeConfig, build_default_runtime
 from .core.trace import TraceSink
 
 BANNER = """\
 ============================================================
- Mini-Agent  |  从零实现的 Agent Runtime（无 agent 框架依赖）
+ 小田 · 工作助理 Agent  |  Runtime 从零实现，无 agent 框架依赖
  输入 /help 查看命令，/quit 退出
 ============================================================"""
 
@@ -50,12 +50,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="把思考过程也放进 LLM context（默认只进审计/日志）")
     p.add_argument("--no-compress", action="store_true", help="关闭基础压缩")
     p.add_argument("--demo", action="store_true", help="运行双窗口隔离演示后退出")
+    p.add_argument("--check-llm", action="store_true",
+                   help="只读自检真实 LLM 配置（不发起请求、不打印密钥），然后退出")
     return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     load_env_file(Path(__file__).resolve().parents[1] / ".env")
+
+    if args.check_llm:
+        status = check_llm_config()
+        print("真实 LLM 配置自检（只读，未发起请求）")
+        for key, value in status.items():
+            print(f"  {key}: {value}")
+        print("结论:", "已配置，可用 --llm openai 让模型基于 Schema 自主决策"
+              if status["ok"] else "未配置，当前只能使用离线协议验证后端")
+        return 0 if status["ok"] else 1
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
@@ -81,8 +92,12 @@ def main(argv: list[str] | None = None) -> int:
         from .demo import run_demo
         return run_demo(runtime)
 
+    backend = type(runtime.llm).__name__
+    real_llm = backend == "OpenAICompatLLM"
     print(BANNER)
-    print(f"LLM      : {type(runtime.llm).__name__} (protocol={runtime.protocol})")
+    print(f"决策后端 : {backend}（{'真实 LLM，基于工具 Schema 自主决策' if real_llm else '离线协议验证替身，非真实模型'}）")
+    if not real_llm:
+        print("           配置 .env 后加 --llm openai 即为真实模型；--check-llm 可自检配置")
     print(f"工具     : {', '.join(runtime.registry.names())}")
     print(f"Session  : {args.session}   最大工具轮次: {args.max_rounds}")
     print(f"持久化   : {args.persist or '关闭（仅内存）'}")
