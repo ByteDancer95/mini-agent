@@ -6,6 +6,8 @@ LLM 只是被抽象成 `generate(messages, tool_schemas) -> LLMResponse` 的一�
 
 运行时**零第三方依赖**（纯 Python 标准库），**零密钥也能跑完整流程**（自动降级为本地确定性替身）。
 
+> **GitHub 仓库：https://github.com/ByteDancer95/mini-agent** （public）
+
 ---
 
 ## 1. 特性一览
@@ -29,7 +31,7 @@ LLM 只是被抽象成 `generate(messages, tool_schemas) -> LLMResponse` 的一�
 要求：Python ≥ 3.10（开发环境为 Python 3.14）。无需 `pip install`。
 
 ```bash
-git clone <your-repo-url> mini-agent
+git clone https://github.com/ByteDancer95/mini-agent.git
 cd mini-agent
 
 # ① 零密钥：直接跑题目指定的双窗口隔离演示
@@ -51,14 +53,17 @@ cp .env.example .env        # 填入自己的值；.env 已被 .gitignore 忽略
 
 `.env` 中只放下面这些变量名（**值不要写进任何 .py 文件**）：
 
-```
-MINI_AGENT_API_KEY=<你的 key>
-MINI_AGENT_BASE_URL=<OpenAI 兼容端点，通常以 /v1 结尾>
-MINI_AGENT_MODEL=<模型名>
-MINI_AGENT_LLM_PROTOCOL=json      # 或 native（使用厂商 function calling）
+```ini
+# 把值填在等号后面（此文件不要提交）
+MINI_AGENT_API_KEY=
+MINI_AGENT_BASE_URL=
+MINI_AGENT_MODEL=
+MINI_AGENT_LLM_PROTOCOL=json
 MINI_AGENT_TIMEOUT=60
 ```
 
+变量含义：密钥 / OpenAI 兼容端点（通常以 `/v1` 结尾）/ 模型名 /
+`json` 或 `native`（使用厂商 function calling）/ 超时秒数。
 也兼容 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`。然后：
 
 ```bash
@@ -376,9 +381,10 @@ python -m unittest discover -s tests -v      # 零依赖，115 个用例
 
 ---
 
-## 10. 提交到 GitHub
+## 10. GitHub 仓库
 
-本地仓库已 `git init` 并完成提交后，推送：
+本仓库已推送至 **https://github.com/ByteDancer95/mini-agent**（public，分支 `main`）。
+若 fork 后要推到自己的账号：
 
 ```bash
 git remote add origin https://github.com/<你的用户名>/mini-agent.git
@@ -387,4 +393,5 @@ git push -u origin main
 ```
 
 （若本机装有 `gh`：`gh repo create mini-agent --public --source=. --push`。）
-仓库链接即为 `https://github.com/<你的用户名>/mini-agent`。
+提交历史中不含 `.env`、会话状态或任何密钥：推送前已用 `.gitignore` 过滤，
+并有 `test_python_sources_have_no_hardcoded_credentials` 做回归检查。
