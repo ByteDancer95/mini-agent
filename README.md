@@ -1,10 +1,17 @@
-# Mini-Agent｜从零实现的最小可用 Agent
+# Mini-Agent｜从零实现的 Agent Harness
 
 **https://github.com/ByteDancer95/mini-agent** · Python ≥ 3.10 · 零第三方依赖 · 零密钥可跑
 
-不依赖 langgraph / openhands / openclaw：主循环、工具注册、输出解析、会话隔离、context 管理、
-trace 全部自己实现，LLM 只是 `generate(messages, tool_schemas) -> LLMResponse` 一个可替换组件。
-交付物是**一个能跑的通用任务助理 Agent（小田） + 它自研的 Runtime**，不是框架库，也不是垂直业务 bot。
+> **这是一道 Agent Harness 技术笔试题。** 重点不是「做了一个多聪明的业务助手」，
+> 而是自研那层把模型包成**可运行、可观测、可复现系统**的执行外壳：主循环与停止条件、
+> 工具 Schema 注册与执行隔离、context 生命周期、多 session 状态、trace、容错与批量评测。
+> LLM 被收敛成 `generate(messages, tool_schemas) -> LLMResponse` 一个可替换组件 ——
+> 正因如此，`HeuristicLLM` / `ScriptedLLM` / 本地 fake HTTP 端点才能零密钥验证整条链路。
+> **这不是妥协，而是 Harness 题要求的可复现性本体。**
+
+不依赖 langgraph / openhands / openclaw。交付物是**一个自研 Agent Harness（`core/` 下的 Runtime）
++ 挂在它上面的最小示例 Agent「小田」**：小田只用来验收外壳能不能把决策者跑起来，
+不是垂直业务 bot，重心也不在 persona。
 
 > **关于「最小可用」的取舍**：题目要的是最小可用，不是功能最多。当前只有 **2 个入口**
 > （`cli.py` 交互/演示、`walkthrough.py` 导出决策证据）。开发过程中曾做过 4 个入口、
@@ -22,7 +29,8 @@ python -m mini_agent.cli                 # 交互对话
 python -m mini_agent.cli --trace --trace-file logs/t.jsonl
 python -m mini_agent.cli --check-llm     # 只读自检真实 LLM 配置（不请求、不打印密钥）
 python -m mini_agent.walkthrough         # 逐帧导出一轮决策链路（协议证据）
-python -m unittest discover -s tests -v # 135 个用例
+python -m unittest discover -s tests -v        # 143 个用例
+python -m unittest tests.test_harness_eval -v  # case 批量评测 + 确定性重放
 ```
 
 未配置 LLM 时自动降级为 `HeuristicLLM` —— **本地确定性替身，不是 AI**，只用来在没有 key 的
@@ -63,6 +71,12 @@ flowchart TB
 ```
 
 Runtime 只认识 `AgentOutput` 与 `ToolResult`。换模型、加工具都不改主循环。
+
+**Harness 的边界**：`core/` 是执行外壳，`tools/` 是可插拔能力，`agent.py` 只是把两者装成
+一台能被提问的整机。题目逐条列出的「最大轮次限制 / 保留历史状态 / 自行判断哪些信息进 context /
+工具调用 trace / 多 session 隔离」是**外壳契约**而非业务功能，分别落在 §3、§4、§5.1。
+把决策者做成可替换组件是这套设计的核心：`--llm heuristic|openai`、注入自定义 LLM、
+`ScriptedLLM` 录制重放，走的是同一个 `AgentRuntime.run()`。
 
 ### 2.2 主循环
 
@@ -187,9 +201,10 @@ repair / compact / loop_limit / final / error` 等事件；`result.trace.to_text
 ## 5. 测试与验证
 
 ```bash
-python -m unittest discover -s tests -v        # 135 个用例，零依赖
+python -m unittest discover -s tests -v        # 143 个用例，零依赖
 python -m unittest tests.test_robustness -v    # 坏输出语料 + 不变量
 python -m unittest tests.test_openai_e2e -v    # 本地 fake 端点 + 真实 HTTP
+python -m unittest tests.test_harness_eval -v  # case 批量评测 + 确定性重放
 ```
 
 | 文件 | 覆盖 |
@@ -198,10 +213,28 @@ python -m unittest tests.test_openai_e2e -v    # 本地 fake 端点 + 真实 HTT
 | `test_runtime.py` / `test_context.py` / `test_sessions.py` | 主循环、轮次上限、context 放置、隔离与持久化 |
 | `test_robustness.py` | **20 种真实模型坏输出** + 随机畸形流不变量 + 工具异常不外溢 + context 有界 + 交错会话不串台 |
 | `test_openai_e2e.py` | 本地 fake OpenAI 端点、真实 HTTP 跑完整 loop（json / native） |
+| `test_harness_eval.py` | **5 个 case 批量回归 + 录制/重放一致性 + 失败判定 + 跨 case 隔离** |
 | `test_agent.py` / `test_integration.py` / `test_llm.py` | 整机、实录、配置自检、无密钥扫描、CLI 入口 |
 
 **测试性质**：不变量测试断言的是「任意畸形输入下都不崩、都收敛、context 有界、会话不串台」，
 而不是某个字段在不在。`tests/fixtures/llm_outputs.json` 是坏输出语料，可直接追加真实模型翻车样本。
+
+### 5.1 Harness 评测闭环：case 驱动与确定性重放
+
+`core/eval.py` 是 **Harness 的一等能力**，不是一次性脚本：
+
+| 组件 | 职责 |
+| --- | --- |
+| `EvalCase` | 多轮输入 + 可观测断言：工具调用序列、每轮 status、答案片段、会话 todos、`forbidden_context`（跨 session 不串台） |
+| `run_suite()` | 每个 case 用独立 runtime 批量执行，返回机器可读 `SuiteResult`（含逐轮 `trace.summary()`） |
+| `RecordingLLM` | 透明包住任意 LLMClient，录下每次 `generate()` 的原始响应（可 JSON 落盘） |
+| `record_and_replay()` | 用 `ScriptedLLM` 按序喂回，**离线复现工具序列 / status / 答案 / todos**，不需要模型、不需要密钥 |
+
+case 语料在 `tests/harness_cases.json`，覆盖工具调用、带工具追问、纯对话追问、单次多工具决策、
+双窗口隔离。这套闭环是 harness 与「一个 agent demo」的分水岭：能定义 case、能批量回归、
+能把翻车现场原样重放。评测由 `unittest` 驱动，**不新增 CLI 入口**，仍是 2 个入口。
+
+限制：录制的是模型输出序列，不录制工具的外部副作用；内置工具均为本地 mock，故可完全复现。
 
 ---
 
@@ -214,11 +247,15 @@ python -m unittest tests.test_openai_e2e -v    # 本地 fake 端点 + 真实 HTT
 | 不做垂直业务场景（农业/客服/代码助手） | 演示缺少故事线 | 题目工具清单是通用能力验收，领域封装不命中评分点、稀释核心 |
 | 工具串行执行 | N 个工具延迟线性累加 | 题目未要求并行；串行更简单、trace 更易读 |
 | 确定性 digest 压缩，不接 LLM 摘要 | 长对话语义有损 | 省一次 API 调用与不确定性；题目明确「基础压缩即可」 |
+| 批量评测做成 `core/eval.py` + unittest 驱动，而非第三个 CLI | 没有独立 `eval` 命令 | 评测是库能力；加入口就破坏「2 个入口」的减法结论 |
 | 不写并发写锁 | 多进程同时写同一 session 未保护 | 单文件 JSON 持久化够用，加锁超出「最小可用」 |
 
-**已知限制**：`HeuristicLLM` 是离线替身（关键词决策，不具语言理解）；`search`/`weather` 为本地 mock；
+**已知限制**：`HeuristicLLM` 是关键词替身、不具语言理解，它验证的是 harness 链路而非模型智能
+（在 Harness 题里这是可替换决策者的正确形态，不是缺陷）；`search`/`weather` 为本地 mock；
+`core/eval.py` 只重放模型输出序列，不重放工具的外部副作用。
 题目禁止写密钥且本机无 LLM 配置，因此仓库内没有真实模型输出样本 —— 填 `.env` 后
-`python -m mini_agent.walkthrough --llm openai --save my_run.md` 可生成真实版本。
+`python -m mini_agent.walkthrough --llm openai --save my_run.md` 可生成真实版本，
+`RecordingLLM` 也能把真实模型的决策轨迹录成离线回归语料。
 
 ---
 
@@ -244,7 +281,8 @@ python -m unittest tests.test_openai_e2e -v    # 本地 fake 端点 + 真实 HTT
 | 多 session 隔离、随时继续 | `session.py` + `ctx.state` | `--demo`、`test_sessions`、`test_robustness` |
 | context：轮次上限 / 历史 / 两类追问 / 自行取舍 / 压缩 | **§3** | `test_context`、`test_runtime` |
 | 异常处理 + trace | §4 | `--trace`、`test_runtime` |
-| 测试用例 | `tests/` | 135 个用例 |
+| 测试用例 | `tests/` | 143 个用例 |
 | README：运行方式 / 系统设计 / memory 召回与放置 | §1 / §2 / **§3** | 直接查阅 |
 | AI Prompt 与问题解决记录 | `PROMPT_LOG.md` | 直接查阅 |
 | 代码严禁写 LLM API / 密钥 | §7 | 密钥扫描测试 |
+| **（Harness 加分项）** case 批量评测与确定性重放 | `core/eval.py` + `tests/harness_cases.json` | `test_harness_eval`、§5.1 |

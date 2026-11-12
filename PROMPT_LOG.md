@@ -142,7 +142,7 @@ LLM context？给出取舍理由、放置位置、基础压缩策略，并说明
 | 砍掉 / 合并 | 原因 |
 | --- | --- |
 | `demo.py` 独立入口 → 并入 `cli.py --demo`；`agent.py` 的 `main()` / `_repl` / 四轮脚本删除 | 4 个入口各有 argparse/main，概念重复；`--demo` 已覆盖 |
-| README 479 → ~190 行 | 只留运行 / 系统设计 / **memory 召回与放置** / 测试 / 取舍；评分点表压到附录 |
+| README 479 → 250 行 | 只留运行 / 系统设计 / **memory 召回与放置** / 测试 / 取舍；评分点表压到附录 |
 | 删除提交的 `docs/RUN_TRANSCRIPT.md` | 生成物不进版本库，`walkthrough --save` 按需生成 |
 | 本文件从「30 条工整问题表」改成真实轨迹 | 招聘方要的是协作过程与判断力，不是包装过的成果清单 |
 
@@ -162,7 +162,62 @@ context 有界、交错会话不串台），以及顺手修掉的「纯对话不
 python -m mini_agent.cli --demo                  # 双窗口隔离：全部通过
 python -m mini_agent.cli --check-llm            # 自检当前是不是真实 LLM
 python -m mini_agent.walkthrough                # 逐帧查看一轮决策链路
-python -m unittest discover -s tests -v         # 135 个用例
+python -m unittest discover -s tests -v         # 143 个用例
 python -m unittest tests.test_robustness -v     # 坏输出语料 + 不变量
 python -m unittest tests.test_openai_e2e -v     # 本地 fake 端点 + 真实 HTTP
+python -m unittest tests.test_harness_eval -v   # case 批量评测 + 确定性重放
 ```
+
+---
+
+## 八、第五轮前提修正：这是 Agent Harness 技术笔试题
+
+用户最后补了一句「**这是 Agent harness 技术笔试题**」。工作区目录从第一天就叫
+`D:/desktop/AgentHarness`，而我前四轮一直按「通用 Agent 实现题」在定性 ——
+这是本次开发里最该早发现、却最晚才发现的前提错误。
+
+### 被推翻的判断
+
+| 我之前的说法 | Harness 口径下的修正 |
+| --- | --- |
+| 主交付是「通用任务助理 Agent（小田）+ 它自研的 Runtime」 | 主交付是**自研 Agent Harness**；小田只是挂在外壳上的最小示例 Agent |
+| 反复为「默认不是真 LLM」辩解，当成软肋 | **是考点不是缺陷**：Harness 的本质就是决策者可替换，deterministic / scripted / mock backend 是可复现验证的前提 |
+| trace / 隔离 / 压缩 / 容错算加分项 | 是题目主体，逐条对应 Harness 契约，一条都不能减 |
+| README 写「不是框架库」 | 重心放反：该写「不是垂直业务 bot，是自研 Harness + 最小示例」 |
+| 做减法 = 少写代码 | 减的是入口 / 文档 / 生成物这些**包装噪音**，不是 Harness 能力 |
+
+题目逐条列的「最大轮次限制 / 保留历史状态 / 自行判断哪些信息进 context / 工具调用 trace /
+多 session 隔离」，其实是**外壳契约清单**，不是业务功能清单。早点按这个读题，第二轮就不会
+去补 persona 和四轮脚本演示。
+
+### 代码核查后的意外发现
+
+复读 `runtime.py` 才发现现状比我前几轮口头描述的更完整：`RuntimeConfig` 已有
+`max_tool_rounds` / `max_llm_retries` / `max_parse_repairs` 三个预算开关，`_think()` 里有
+LLM 重试 + `REPAIR_HINT` 解析修复，轮次耗尽走 `force_final → _fallback_answer` 三级收尾，
+`Trace` 有 `to_dicts()` / `summary()`。**这说明我前几轮是凭记忆描述系统，而不是每次重读代码**
+—— 这个习惯问题比某个判断错了更值得记下来。
+
+真正缺的是 Harness 的最后一环：**能定义 case、批量跑、把翻车现场重放出来**。
+
+### 这一轮做了什么
+
+1. `core/eval.py`（新增）：`EvalCase` / `CaseResult` / `SuiteResult`、
+   `run_case()` / `run_suite()`、`RecordingLLM` / `record_and_replay()`。
+   录制每次 `generate()` 的原始响应，重放时用 `ScriptedLLM` 按序喂回并比对
+   工具序列 / status / 答案 / todos —— 离线复现，不需要模型和密钥。
+   放 `core/` 是因为评测是 Harness 一等能力，但**由 unittest 驱动、不新增 CLI 入口**，
+   不破坏上一轮「2 个入口」的结论。
+2. `tests/harness_cases.json` + `tests/test_harness_eval.py`：5 个 case（工具调用 / 带工具追问 /
+   纯对话追问 / 单次多工具决策 / 双窗口隔离），8 个测试覆盖批量回归、失败判定、
+   机器可读结果、录制可 JSON 落盘、每个 case 重放一致、跨 case 隔离。
+3. `cli.py`：demo 步骤注释写「并行调用 weather + todo.add」，但 `runtime.py` 是
+   `for call in output.tool_calls` **串行**执行 —— 文档与实现不符，改成
+   「单次决策调用多个工具（逐个串行执行）」。README §6 本已如实写了串行，只有这处注释没对齐。
+4. README / 本文件按 Harness 口径重写定性，新增 §5.1 评测闭环说明与附录加分项。
+
+### 结论
+
+前四轮的方向（不做垂直业务、评分点自证、做减法、坏输出鲁棒性）**结论仍然成立**，
+但理由要换：不是「笔试题别炫技」，而是「Harness 题考的就是外壳，业务封装不在契约里」。
+补评测闭环与上一轮做减法不矛盾 —— **减的是包装，补的是契约**。

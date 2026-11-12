@@ -32,7 +32,7 @@ WINDOW_2 = "userA/window2"
 # 题目场景：窗口1 查天气记待办 / 窗口2 写周报记待办；之后各自继续对话互不干扰
 DEMO_STEPS: list[tuple[str, str, str]] = [
     (WINDOW_1, "查一下广州今天的天气，顺便记个待办：明天给大棚番茄喷药",
-     "并行调用 weather + todo.add"),
+     "单次决策调用 weather + todo.add（逐个串行执行）"),
     (WINDOW_2, "帮我写一份本周周报，另外记个待办：周五前提交课程报告",
      "调用 read_docs + todo.add，与窗口1 隔离"),
     (WINDOW_1, "继续，把我刚才记的待办列出来", "带工具追问 todo.list"),
