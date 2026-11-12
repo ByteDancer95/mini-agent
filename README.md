@@ -73,10 +73,8 @@ flowchart TB
 Runtime 只认识 `AgentOutput` 与 `ToolResult`。换模型、加工具都不改主循环。
 
 **Harness 的边界**：`core/` 是执行外壳，`tools/` 是可插拔能力，`agent.py` 只是把两者装成
-一台能被提问的整机。题目逐条列出的「最大轮次限制 / 保留历史状态 / 自行判断哪些信息进 context /
-工具调用 trace / 多 session 隔离」是**外壳契约**而非业务功能，分别落在 §3、§4、§5.1。
-把决策者做成可替换组件是这套设计的核心：`--llm heuristic|openai`、注入自定义 LLM、
-`ScriptedLLM` 录制重放，走的是同一个 `AgentRuntime.run()`。
+一台能被提问的整机；`--llm heuristic|openai`、注入自定义 LLM、`ScriptedLLM` 录制重放，
+走的是同一个 `AgentRuntime.run()`。与公开 Runtime 接口的可确证对照见 §2.5。
 
 ### 2.2 主循环
 
@@ -125,6 +123,25 @@ def echo(args, ctx): return {"text": args["text"]}
 **不存在模块级全局列表**。持久化文件名用 `sha256(session_id)`，避免 id 当路径造成穿越。
 `cli.py --demo` 演示：窗口1 查天气+记待办、窗口2 写周报+记待办，之后各自带工具追问 /
 纯对话追问 / 换话题继续，历史与待办全程互不串台。
+
+### 2.5 与公开 Runtime 接口的对照（可确证部分）
+
+本节只对比**本项目真实实现过、可由代码验证**的接口差异，不臆测其他框架的内部实现：
+
+| 维度 | 本项目 `json` 协议 | 本项目 `native` 协议 |
+| --- | --- | --- |
+| 工具目录位置 | `build_system_prompt()` 写进 system prompt | `payload["tools"]`（`llm.py:160`） |
+| 工具调用载体 | 模型输出 JSON，由 `parser.py` 多级容错提取 | 响应里的 `tool_calls`，`parser.py` 优先解析 |
+| 工具结果回灌 | `<tool_result name=...>` 结构化文本，紧跟决策进历史 | 标准 `role=tool` 消息 |
+| 适用端点 | 任何文本兼容端点 | 支持 `tools` / `tool_choice` 的端点 |
+
+**为什么两种都留**：把决策协议与 Runtime 解耦后，换端点只换 `LLMClient` 实现，
+`AgentRuntime.run()` 一行不改；自研 JSON 解析还能兜住代码围栏、截断 JSON、全角引号等坏输出
+（20 种语料见 `tests/fixtures/llm_outputs.json`）。`--check-llm` 可当场确认当前协议，
+`tests/test_openai_e2e.py` 用本地 fake 端点对两种协议各跑一次完整 loop，无需密钥。
+
+**边界声明**：状态机、沙盒、工具输出内容块等更深层的框架对照，需要逐行阅读对应源码后
+才能下结论，本文不做未经核实的类比；该部分属于架构设计题的回答范围。
 
 ---
 
